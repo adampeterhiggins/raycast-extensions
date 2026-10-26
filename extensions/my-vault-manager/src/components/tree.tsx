@@ -9,6 +9,7 @@ import {
   getTechnicalPaths,
   getVaultNamespace,
   removeFromFavorites,
+  vaultTitle,
 } from "../utils";
 import {
   Action,
@@ -19,16 +20,18 @@ import {
   Detail,
   Icon,
   List,
-  openCommandPreferences,
-  showHUD,
   showToast,
   Toast,
+  useNavigation,
 } from "@raycast/api";
 import { Back, Configuration, CopyToken, OpenVault, Reload, Root } from "./actions";
 import { VaultDisplay } from "./display";
 import { useCachedState, usePromise } from "@raycast/utils";
+import { VaultForm } from "./vaults";
+import { getActiveVault } from "../vaults";
 
 export function VaultTree(props: { path: string }) {
+  const { push } = useNavigation();
   const [isLoading, setIsLoading] = useState(false);
   const [showTechnical, setShowTechnical] = useCachedState("show-technical", false, { cacheNamespace: "tree" });
   const [keys, setKeys] = useState<VaultListEntry[]>([]);
@@ -41,8 +44,8 @@ export function VaultTree(props: { path: string }) {
     } catch (e: unknown) {
       if (e instanceof ConfigurationError) {
         console.error(e);
-        await showHUD(e.message);
-        await openCommandPreferences();
+        await showToast({ style: Toast.Style.Failure, title: e.message });
+        push(<VaultForm vault={getActiveVault()} />);
         return;
       }
       setError(e);
@@ -120,19 +123,22 @@ export function VaultTree(props: { path: string }) {
   return error != null ? (
     <Detail
       markdown={buildError(error)}
+      navigationTitle={vaultTitle(props.path)}
       actions={
         <ActionPanel>
+          <Reload revalidate={revalidate} />
           <Configuration />
         </ActionPanel>
       }
     />
   ) : (
-    <List filtering={true} isLoading={isLoading || isLoadingTree} navigationTitle={props.path}>
+    <List filtering={true} isLoading={isLoading || isLoadingTree} navigationTitle={vaultTitle(props.path)}>
       <List.EmptyView
         title={"No secrets found"}
         actions={
           <ActionPanel>
             <Configuration />
+            <Reload revalidate={revalidate} />
           </ActionPanel>
         }
       />

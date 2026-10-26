@@ -17,45 +17,32 @@ import {
   VaultVersion,
 } from "./interfaces";
 import got from "got";
-import { Cache, Form, getPreferenceValues, LocalStorage, open, showToast, Toast, environment } from "@raycast/api";
+import { Cache, LocalStorage, open, showToast, Toast } from "@raycast/api";
 import * as oauthService from "./oauth.service";
 import { homedir } from "os";
 import fs from "fs";
 import hdate from "human-date";
-import Values = Form.Values;
+import { favoritesStorageKey, getActiveVault, vaultCacheKey, VaultInstance } from "./vaults";
 
 const NO_NAMESPACE = "<EMPTY>";
 
-// Define a local preferences interface so this command can be reused by multiple commands (dev/prod)
-interface VaultPreferences {
-  url: string;
-  secretEngine: string;
-  loginMethod: "oidc" | "ldap" | "token";
-  ldap?: string;
-  password?: string;
-  token?: string;
-  technicalPaths?: string;
-  favoriteNamespaces?: string;
-  enableWrite: boolean;
-  enableDelete: boolean;
-}
-
-const preferences = getPreferenceValues<VaultPreferences>();
-const vaultUrl = preferences.url.replace(/\/$/, "");
 const cache = new Cache();
 
-function namespacedKey(baseKey: string): string {
-  // Prefix with the command name to isolate caches per profile/command
-  const prefix = environment.commandName || "vault";
-  return `${prefix}:${baseKey}`;
+function vaultKey(baseKey: string): string {
+  return vaultCacheKey(getActiveVault().id, baseKey);
 }
 
 export function writeEnabled(): boolean {
-  return preferences.enableWrite || true;
+  return getActiveVault().enableWrite;
 }
 
 export function deleteEnabled(): boolean {
-  return preferences.enableDelete || false;
+  return getActiveVault().enableDelete;
+}
+
+export function vaultTitle(suffix?: string): string {
+  const { name } = getActiveVault();
+  return suffix ? `${name}: ${suffix}` : name;
 }
 
 export function stringify(value: object) {
@@ -70,15 +57,15 @@ export function duration(date: string) {
 }
 
 export function getVaultUrl(): string {
-  return vaultUrl;
+  return getActiveVault().url;
 }
 
 export function getVaultNamespaceConfiguration(): string | null | undefined {
-  return cache.get(namespacedKey(VAULT_NAMESPACE_CACHE_KEY));
+  return cache.get(vaultKey(VAULT_NAMESPACE_CACHE_KEY));
 }
 
 export function getVaultNamespace(): string {
-  const namespaceInCache = cache.get(namespacedKey(VAULT_NAMESPACE_CACHE_KEY));
+  const namespaceInCache = cache.get(vaultKey(VAULT_NAMESPACE_CACHE_KEY));
   if (!namespaceInCache || namespaceInCache === NO_NAMESPACE) {
     return "";
   }
@@ -87,44 +74,56 @@ export function getVaultNamespace(): string {
 
 export async function setVaultNamespace(newNamespace: string) {
   const newNamespaceInCache = newNamespace === "" ? NO_NAMESPACE : newNamespace;
-  cache.set(namespacedKey(VAULT_NAMESPACE_CACHE_KEY), newNamespaceInCache);
+  cache.set(vaultKey(VAULT_NAMESPACE_CACHE_KEY), newNamespaceInCache);
   // remove cached token as namespace changes
-  cache.remove(namespacedKey(VAULT_TOKEN_CACHE_KEY));
-  if (preferences.loginMethod === "oidc") {
+  cache.remove(vaultKey(VAULT_TOKEN_CACHE_KEY));
+  if (getActiveVault().loginMethod === "oidc") {
     await oauthService.clearTokens();
   }
 }
 
+// Forget any login for a vault, e.g. after its url or credentials change
+export async function clearVaultTokens(vault: VaultInstance) {
+  cache.remove(vaultCacheKey(vault.id, VAULT_TOKEN_CACHE_KEY));
+  await oauthService.clearTokens(vault);
+}
+
 export function setSecretEngine(secretEngine: string) {
-  cache.set(namespacedKey(VAULT_SECRET_ENGINE_CACHE_KEY), secretEngine);
+  cache.set(vaultKey(VAULT_SECRET_ENGINE_CACHE_KEY), secretEngine);
 }
 
 export function getSecretEngine(): string {
-  const secretEngineInCache = cache.get(namespacedKey(VAULT_SECRET_ENGINE_CACHE_KEY));
+  const secretEngineInCache = cache.get(vaultKey(VAULT_SECRET_ENGINE_CACHE_KEY));
   if (!secretEngineInCache) {
-    return preferences.secretEngine;
+    return getActiveVault().secretEngine;
   }
   return secretEngineInCache;
 }
 
 export function getTechnicalPaths(): string[] {
-  return preferences.technicalPaths ? preferences.technicalPaths.split(" ") : [];
+  const { technicalPaths } = getActiveVault();
+  return technicalPaths ? technicalPaths.split(" ") : [];
 }
 
 export function getFavoriteNamespaces(): string[] {
-  return preferences.favoriteNamespaces ? preferences.favoriteNamespaces.split(" ") : [];
+  const { favoriteNamespaces } = getActiveVault();
+  return favoriteNamespaces ? favoriteNamespaces.split(" ") : [];
 }
 
 export async function getUserToken(): Promise<string> {
-  if (preferences.loginMethod === "oidc") {
+  const vault = getActiveVault();
+  if (vault.loginMethod === "oidc") {
     return await oauthService.authorize();
+  }
+  if (vault.loginMethod === "token") {
+    return vault.token ?? "";
   }
   const tokenCache = parseTokenFromCache();
   return tokenCache ? tokenCache.token : "";
 }
 
 export function parseTokenFromCache(): VaultTokenCache | undefined {
-  const tokenCacheString = cache.get(namespacedKey(VAULT_TOKEN_CACHE_KEY));
+  const tokenCacheString = cache.get(vaultKey(VAULT_TOKEN_CACHE_KEY));
   if (tokenCacheString) {
     return JSON.parse(tokenCacheString) as VaultTokenCache;
   }
@@ -143,20 +142,21 @@ export async function getVaultClient(): Promise<NodeVault.client> {
   if (tokenCache) {
     if (Date.now() > tokenCache.expiration) {
       // token expired, removing from cache
-      cache.remove(namespacedKey(VAULT_TOKEN_CACHE_KEY));
+      cache.remove(vaultKey(VAULT_TOKEN_CACHE_KEY));
       console.info("Token expired, removing from cache");
       tokenCache = undefined;
     }
   }
 
   // get token if needed
+  const vault = getActiveVault();
   let token;
   if (tokenCache) {
     token = tokenCache.token;
   } else {
-    if (preferences.loginMethod === "ldap") {
-      if (!preferences.ldap || !preferences.password) {
-        throw new ConfigurationError("Ldap method needs ldap and password to be set in preferences");
+    if (vault.loginMethod === "ldap") {
+      if (!vault.ldap || !vault.password) {
+        throw new ConfigurationError(`Ldap method needs ldap and password to be set for vault ${vault.name}`);
       }
       console.info("Login with ldap...");
       const body = await callLoginWithLdap();
@@ -166,15 +166,15 @@ export async function getVaultClient(): Promise<NodeVault.client> {
         expiration: Date.now() + body.auth.lease_duration * 1000,
       };
       // and save it
-      cache.set(namespacedKey(VAULT_TOKEN_CACHE_KEY), JSON.stringify(tokenCache));
+      cache.set(vaultKey(VAULT_TOKEN_CACHE_KEY), JSON.stringify(tokenCache));
       console.info("Logged successfully, saving token in cache");
       token = tokenCache.token;
-    } else if (preferences.loginMethod === "token") {
-      if (!preferences.token) {
-        throw new ConfigurationError("Token method needs token to be set in preferences");
+    } else if (vault.loginMethod === "token") {
+      if (!vault.token) {
+        throw new ConfigurationError(`Token method needs token to be set for vault ${vault.name}`);
       }
-      token = preferences.token;
-    } else if (preferences.loginMethod === "oidc") {
+      token = vault.token;
+    } else if (vault.loginMethod === "oidc") {
       token = await oauthService.authorize();
     } else {
       throw new Error("Unknown login method");
@@ -434,9 +434,10 @@ export async function callGetSysMounts(): Promise<VaultMount[]> {
 }
 
 export async function callLoginWithLdap(): Promise<VaultLoginResponse> {
+  const { ldap, password } = getActiveVault();
   return got
-    .post(`${getVaultUrl()}/v1/auth/ldap/login/${preferences.ldap}`, {
-      json: { password: preferences.password },
+    .post(`${getVaultUrl()}/v1/auth/ldap/login/${ldap}`, {
+      json: { password },
       headers: {
         "Content-Type": "application/json",
         "X-Vault-Namespace": getVaultNamespace(),
@@ -470,8 +471,17 @@ export async function callLoginWthOidc(code: string, state: string): Promise<Vau
     .json();
 }
 
+async function getFavoritePaths(): Promise<string[]> {
+  const stored = await LocalStorage.getItem<string>(favoritesStorageKey(getActiveVault().id));
+  return stored ? (JSON.parse(stored) as string[]) : [];
+}
+
+async function setFavoritePaths(paths: string[]) {
+  await LocalStorage.setItem(favoritesStorageKey(getActiveVault().id), JSON.stringify(paths));
+}
+
 export async function listFavorites(): Promise<VaultListEntry[]> {
-  return Object.keys(await LocalStorage.allItems<Values>()).map((key: string) => ({
+  return (await getFavoritePaths()).map((key: string) => ({
     key: key,
     label: key,
     folder: key.endsWith("/"),
@@ -480,11 +490,14 @@ export async function listFavorites(): Promise<VaultListEntry[]> {
 }
 
 export async function isFavorite(path: string): Promise<boolean> {
-  return Object.keys(await LocalStorage.allItems<Values>()).includes(path);
+  return (await getFavoritePaths()).includes(path);
 }
 
 export async function addToFavorites(path: string, callback: () => Promise<void>) {
-  await LocalStorage.setItem(path, true);
+  const paths = await getFavoritePaths();
+  if (!paths.includes(path)) {
+    await setFavoritePaths([...paths, path]);
+  }
   await showToast({
     style: Toast.Style.Success,
     title: "Added to favorites",
@@ -493,7 +506,7 @@ export async function addToFavorites(path: string, callback: () => Promise<void>
 }
 
 export async function removeFromFavorites(path: string, callback: () => Promise<void>) {
-  await LocalStorage.removeItem(path);
+  await setFavoritePaths((await getFavoritePaths()).filter((favorite) => favorite !== path));
   await showToast({
     style: Toast.Style.Success,
     title: "Removed from favorites",
