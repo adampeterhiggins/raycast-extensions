@@ -109,3 +109,46 @@ export function vaultCacheKey(vaultId: string, baseKey: string): string {
 export function vaultIcon(vault: VaultInstance) {
   return { source: Icon.CircleFilled, tintColor: VAULT_COLORS[vault.color] };
 }
+
+export type VaultImport = Partial<Omit<VaultInstance, "id">> & Pick<VaultInstance, "name" | "url">;
+
+function isVaultImport(value: unknown): value is VaultImport {
+  const candidate = value as VaultImport;
+  return (
+    typeof candidate?.name === "string" &&
+    candidate.name.trim() !== "" &&
+    typeof candidate.url === "string" &&
+    /^https?:\/\/.+/.test(candidate.url)
+  );
+}
+
+// Adds vaults passed in a deeplink's launch context, updating any existing vault with the same url
+export async function importVaults(input: unknown): Promise<VaultInstance[]> {
+  if (!Array.isArray(input) || !input.every(isVaultImport)) {
+    throw new Error("Each vault to import needs a name and an http(s) url");
+  }
+  const existing = await listVaults();
+  const imported: VaultInstance[] = [];
+  for (const vault of input) {
+    const url = vault.url.replace(/\/$/, "");
+    const match = existing.find((candidate) => candidate.url === url);
+    imported.push(
+      await saveVault({
+        ...match,
+        name: vault.name.trim(),
+        url,
+        color: vault.color && vault.color in VAULT_COLORS ? vault.color : match?.color ?? "blue",
+        secretEngine: vault.secretEngine ?? match?.secretEngine ?? "secret",
+        loginMethod: vault.loginMethod ?? match?.loginMethod ?? "oidc",
+        ldap: vault.ldap ?? match?.ldap,
+        password: vault.password ?? match?.password,
+        token: vault.token ?? match?.token,
+        technicalPaths: vault.technicalPaths ?? match?.technicalPaths,
+        favoriteNamespaces: vault.favoriteNamespaces ?? match?.favoriteNamespaces,
+        enableWrite: vault.enableWrite ?? match?.enableWrite ?? true,
+        enableDelete: vault.enableDelete ?? match?.enableDelete ?? false,
+      })
+    );
+  }
+  return imported;
+}

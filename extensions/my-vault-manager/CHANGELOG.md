@@ -6,6 +6,7 @@
 - Each vault keeps its own login, namespace, secret engine and favorites.
 - Write and delete permissions are set per vault.
 - Added a "Create Quicklink for Vault" action to open a specific vault straight from Raycast search.
+- Vaults can be imported by opening the command with an `importVaults` launch context, after a confirmation prompt.
 
 ## [Security Maintenance] - 2026-05-21
 
