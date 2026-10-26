@@ -1,11 +1,13 @@
 import { Action, ActionPanel, Form, Icon, useNavigation } from "@raycast/api";
 import { CopyToken, OpenVault, setNamespaceAndGoToTree } from "./actions";
+import { vaultTitle } from "../utils";
 
 export function VaultNamespace() {
   const { push } = useNavigation();
 
   return (
     <Form
+      navigationTitle={vaultTitle("Namespace")}
       actions={
         <ActionPanel>
           <Action.SubmitForm

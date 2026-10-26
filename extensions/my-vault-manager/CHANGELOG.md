@@ -1,5 +1,12 @@
 # Vault Changelog
 
+## [Multiple Vault instances] - 2026-10-26
+
+- Vault instances are configured inside the extension instead of in command preferences, and you can switch between them with `⌘⇧V`.
+- Each vault keeps its own login, namespace, secret engine and favorites.
+- Write and delete permissions are set per vault.
+- Added a "Create Quicklink for Vault" action to open a specific vault straight from Raycast search.
+
 ## [Security Maintenance] - 2026-05-21
 
 - Updated the extension to address security advisories.

@@ -13,6 +13,8 @@ import { VaultEntities } from "./entities";
 import { VaultFavorites } from "./favorites";
 import { ReactNode } from "react";
 import { VaulEngines } from "./engines";
+import { VaultForm, VaultList } from "./vaults";
+import { getActiveVault } from "../vaults";
 
 export async function setNamespaceAndGoToTree(
   values: {
@@ -49,6 +51,18 @@ export function Configuration() {
         </ActionPanel.Section>
       )}
       <ActionPanel.Section title="Configuration">
+        <Action.Push
+          icon={Icon.Switch}
+          title={"Switch Vault"}
+          shortcut={{ modifiers: ["cmd", "shift"], key: "v" }}
+          target={<VaultList />}
+        />
+        <Action.Push
+          icon={Icon.Pencil}
+          title={`Edit ${getActiveVault().name} Settings`}
+          shortcut={{ modifiers: ["cmd", "shift"], key: "e" }}
+          target={<VaultForm vault={getActiveVault()} />}
+        />
         <Action.Push
           icon={Icon.Cog}
           title={"Change Namespace"}

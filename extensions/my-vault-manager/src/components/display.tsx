@@ -28,6 +28,7 @@ import {
   removeFromFavorites,
   stringify,
   writeEnabled,
+  vaultTitle,
 } from "../utils";
 import { VaultEdit } from "./edit";
 import { Back, Configuration, CopyToken, OpenVault, Reload, Root } from "./actions";
@@ -343,7 +344,7 @@ export function VaultDisplay(props: { path: string }) {
     <Detail
       isLoading={isLoading || loadingGetSecret}
       markdown={result}
-      navigationTitle={metadata && props.path + " (v" + metadata.current_version.version + ")"}
+      navigationTitle={metadata && vaultTitle(props.path + " (v" + metadata.current_version.version + ")")}
       actions={generateActions()}
       metadata={
         metadata &&
@@ -383,7 +384,7 @@ export function VaultDisplay(props: { path: string }) {
       isLoading={isLoading || loadingGetSecret}
       isShowingDetail={withDetails}
       filtering={true}
-      navigationTitle={metadata && props.path + " (v" + metadata.current_version.version + ")"}
+      navigationTitle={metadata && vaultTitle(props.path + " (v" + metadata.current_version.version + ")")}
       searchBarPlaceholder="Search in secret"
     >
       <List.Section title={"Secret keys (" + secretList.length + ")"}>

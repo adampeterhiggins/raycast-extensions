@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { VaultListEntry } from "../interfaces";
-import { listFavorites, removeFromFavorites } from "../utils";
+import { listFavorites, removeFromFavorites, vaultTitle } from "../utils";
 import { Action, ActionPanel, Color, Icon, List } from "@raycast/api";
 import { Configuration, Reload } from "./actions";
 import { VaultDisplay } from "./display";
@@ -15,7 +15,7 @@ export function VaultFavorites() {
   });
 
   return (
-    <List filtering={true} isLoading={isLoading}>
+    <List filtering={true} isLoading={isLoading} navigationTitle={vaultTitle("Favorites")}>
       <List.EmptyView
         actions={
           <ActionPanel>

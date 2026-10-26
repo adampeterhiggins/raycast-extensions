@@ -1,17 +1,28 @@
 import { URL } from "url";
 import http from "http";
-import { OAuth, environment } from "@raycast/api";
+import { OAuth } from "@raycast/api";
 import { callLoginWthOidc, callOidcAuthUrl } from "./utils";
+import { getActiveVault, VaultInstance } from "./vaults";
 
 const localPort = 8250;
 
-const client = new OAuth.PKCEClient({
-  redirectMethod: OAuth.RedirectMethod.Web,
-  providerName: "Vault",
-  providerIcon: "vault.png",
-  providerId: `vault-${environment.commandName ?? "default"}`,
-  description: "Connect to vault with OIDC provider (you can change the login method in preferences)",
-});
+const clients = new Map<string, OAuth.PKCEClient>();
+
+// One client per vault so each instance keeps its own OIDC tokens
+function getClient(vault: VaultInstance = getActiveVault()): OAuth.PKCEClient {
+  let client = clients.get(vault.id);
+  if (!client) {
+    client = new OAuth.PKCEClient({
+      redirectMethod: OAuth.RedirectMethod.Web,
+      providerName: `Vault (${vault.name})`,
+      providerIcon: "vault.png",
+      providerId: `vault-${vault.id}`,
+      description: `Connect to ${vault.name} with OIDC provider (you can change the login method in the vault settings)`,
+    });
+    clients.set(vault.id, client);
+  }
+  return client;
+}
 
 function rewriteQueryParam(url: string, paramName: string, paramValue: string): string {
   const urlObj = new URL(url);
@@ -31,11 +42,12 @@ function getQueryParam(url: string, paramName: string): string {
   return paramValue;
 }
 
-export async function clearTokens(): Promise<void> {
-  await client.removeTokens();
+export async function clearTokens(vault?: VaultInstance): Promise<void> {
+  await getClient(vault).removeTokens();
 }
 
 export async function authorize(): Promise<string> {
+  const client = getClient();
   const tokenSet = await client.getTokens();
   if (tokenSet?.accessToken && !tokenSet.isExpired()) {
     return tokenSet.accessToken;
