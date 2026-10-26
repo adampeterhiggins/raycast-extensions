@@ -17,6 +17,7 @@ import { usePromise } from "@raycast/utils";
 import {
   deleteVault,
   getActiveVaultOrUndefined,
+  importVaults,
   listVaults,
   LoginMethod,
   saveVault,
@@ -24,6 +25,7 @@ import {
   VAULT_COLORS,
   VaultColor,
   vaultIcon,
+  VaultImport,
   VaultInstance,
 } from "../vaults";
 import { clearVaultTokens, getVaultNamespaceConfiguration } from "../utils";
@@ -260,5 +262,45 @@ export function VaultForm(props: { vault?: VaultInstance; onSave?: () => unknown
       <Form.Checkbox id="enableWrite" label="Enable write" defaultValue={vault?.enableWrite ?? true} />
       <Form.Checkbox id="enableDelete" label="Enable delete" defaultValue={vault?.enableDelete ?? false} />
     </Form>
+  );
+}
+
+// Deeplinks can come from anywhere, so show what would be imported and wait for the user to confirm
+export function VaultImportConfirmation(props: { vaults: VaultImport[] }) {
+  const { push } = useNavigation();
+
+  async function confirmImport() {
+    try {
+      const imported = await importVaults(props.vaults);
+      await showToast({ style: Toast.Style.Success, title: `Imported ${imported.map(({ name }) => name).join(", ")}` });
+      push(<VaultList />);
+    } catch (error) {
+      await showToast({ style: Toast.Style.Failure, title: "Could not import vaults", message: String(error) });
+    }
+  }
+
+  return (
+    <List navigationTitle="Import Vaults" searchBarPlaceholder="Review the vaults to import">
+      <List.Section title={`Import ${props.vaults.length} vault${props.vaults.length === 1 ? "" : "s"}?`}>
+        {props.vaults.map((vault, index) => (
+          <List.Item
+            key={`${vault.url}-${index}`}
+            icon={{ source: Icon.CircleFilled, tintColor: VAULT_COLORS[vault.color ?? "blue"] ?? Color.Blue }}
+            title={String(vault.name)}
+            subtitle={String(vault.url)}
+            accessories={[
+              ...(vault.enableWrite === false ? [{ tag: { value: "read-only", color: Color.Green } }] : []),
+              { tag: vault.loginMethod ?? "oidc" },
+            ]}
+            actions={
+              <ActionPanel>
+                <Action icon={Icon.Download} title="Import Vaults" onAction={confirmImport} />
+                <Action.Push icon={Icon.XMarkCircle} title="Cancel" target={<VaultList />} />
+              </ActionPanel>
+            }
+          />
+        ))}
+      </List.Section>
+    </List>
   );
 }
