@@ -471,6 +471,20 @@ export async function callLoginWthOidc(code: string, state: string): Promise<Vau
     .json();
 }
 
+// Extends a token that hasn't expired yet by the role's TTL, up to its max TTL
+export async function callRenewSelf(token: string): Promise<VaultLoginResponse> {
+  return got
+    .post(`${getVaultUrl()}/v1/auth/token/renew-self`, {
+      json: {},
+      headers: {
+        "X-Vault-Token": token,
+        "X-Vault-Namespace": getVaultNamespace(),
+      },
+      responseType: "json",
+    })
+    .json();
+}
+
 async function getFavoritePaths(): Promise<string[]> {
   const stored = await LocalStorage.getItem<string>(favoritesStorageKey(getActiveVault().id));
   return stored ? (JSON.parse(stored) as string[]) : [];
