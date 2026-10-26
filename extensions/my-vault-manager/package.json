@@ -315,7 +315,7 @@
     }
   ],
   "dependencies": {
-    "@raycast/api": "^1.52.1",
+    "@raycast/api": "1.52.1",
     "@raycast/utils": "1.7.0",
     "got": "12.5.3",
     "human-date": "1.4.0",
