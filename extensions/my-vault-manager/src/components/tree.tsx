@@ -123,8 +123,10 @@ export function VaultTree(props: { path: string }) {
   return error != null ? (
     <Detail
       markdown={buildError(error)}
+      navigationTitle={vaultTitle(props.path)}
       actions={
         <ActionPanel>
+          <Reload revalidate={revalidate} />
           <Configuration />
         </ActionPanel>
       }
@@ -136,6 +138,7 @@ export function VaultTree(props: { path: string }) {
         actions={
           <ActionPanel>
             <Configuration />
+            <Reload revalidate={revalidate} />
           </ActionPanel>
         }
       />
