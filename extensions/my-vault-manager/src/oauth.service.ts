@@ -1,5 +1,6 @@
+import { URL } from "url";
 import http from "http";
-import { OAuth, open, showToast, Toast } from "@raycast/api";
+import { OAuth } from "@raycast/api";
 import { callLoginWthOidc, callOidcAuthUrl, callRenewSelf } from "./utils";
 import { getActiveVault, VaultInstance } from "./vaults";
 
@@ -8,13 +9,9 @@ const localPort = 8250;
 // Renew tokens with less than this left, so a vault used at least once a token TTL stays signed in
 const renewWithinMs = 30 * 60 * 1000;
 
-// Give up on a browser sign-in nobody finishes, so the callback port is freed
-const signInTimeoutMs = 3 * 60 * 1000;
-
 const clients = new Map<string, OAuth.PKCEClient>();
 
-// One client per vault so each instance keeps its own OIDC tokens. Only its token storage is used: signing in
-// goes straight to the browser rather than through Raycast's sign-in screen
+// One client per vault so each instance keeps its own OIDC tokens
 function getClient(vault: VaultInstance = getActiveVault()): OAuth.PKCEClient {
   let client = clients.get(vault.id);
   if (!client) {
@@ -28,6 +25,12 @@ function getClient(vault: VaultInstance = getActiveVault()): OAuth.PKCEClient {
     clients.set(vault.id, client);
   }
   return client;
+}
+
+function rewriteQueryParam(url: string, paramName: string, paramValue: string): string {
+  const urlObj = new URL(url);
+  urlObj.searchParams.set(paramName, paramValue);
+  return urlObj.toString();
 }
 
 function getQueryPart(url: string): string {
@@ -91,59 +94,54 @@ async function login(vault: VaultInstance): Promise<string> {
   }
 
   const vaultAuthUrlResponse = await callOidcAuthUrl(`http://localhost:${localPort}/oidc/callback`);
-
-  let server: http.Server | undefined;
-  let timeout: NodeJS.Timeout | undefined;
-  const signedIn = new Promise<{ accessToken: string; expiresIn: number }>((resolve, reject) => {
-    server = http.createServer(async function (req, res) {
-      if (!req.url?.startsWith("/oidc/callback")) {
-        res.writeHead(404);
-        res.end();
-        return;
-      }
-
-      try {
-        const queryPart = getQueryPart(req.url);
-        const vaultLoginResponse = await callLoginWthOidc(
-          getQueryParam(queryPart, "code"),
-          getQueryParam(queryPart, "state")
-        );
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(signInPage(`Signed in to ${vault.name}`, "You can close this tab and go back to Raycast."));
-        resolve({
-          accessToken: vaultLoginResponse.auth.client_token,
-          expiresIn: vaultLoginResponse.auth.lease_duration,
-        });
-      } catch (error) {
-        console.error("OIDC callback failed", error);
-        res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(signInPage(`Could not sign in to ${vault.name}`, String(error)));
-        reject(error);
-      }
-    });
-    timeout = setTimeout(() => reject(new Error(`Timed out waiting to sign in to ${vault.name}`)), signInTimeoutMs);
+  const authRequest = await client.authorizationRequest({
+    endpoint: `http://localhost:${localPort}/authorize`,
+    clientId: "vault",
+    scope: "openid",
   });
 
-  await listen(server as http.Server, localPort);
+  let accessToken = "";
+  let expiresIn = 3600;
+  const server = http.createServer(async function (req, res) {
+    if (!req.url?.startsWith("/oidc/callback")) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+
+    try {
+      const queryPart = getQueryPart(req.url);
+      const vaultLoginResponse = await callLoginWthOidc(
+        getQueryParam(queryPart, "code"),
+        getQueryParam(queryPart, "state")
+      );
+
+      accessToken = vaultLoginResponse.auth.client_token;
+      expiresIn = vaultLoginResponse.auth.lease_duration;
+      res.writeHead(301, {
+        Location: rewriteQueryParam(`${authRequest.redirectURI}&${queryPart}`, "state", authRequest.state),
+      });
+    } catch (error) {
+      console.error("OIDC callback failed", error);
+      res.writeHead(500, { "Content-Type": "text/plain" });
+      res.write(`Vault login failed: ${error}`);
+    }
+    res.end();
+  });
+
+  await listen(server, localPort);
   try {
-    await showToast({ style: Toast.Style.Animated, title: `Signing in to ${vault.name} in your browser…` });
-    await open(vaultAuthUrlResponse.data.auth_url);
-    const tokens = await signedIn;
-    await client.setTokens(tokens);
-    await showToast({ style: Toast.Style.Success, title: `Signed in to ${vault.name}` });
-    return tokens.accessToken;
+    await client.authorize({ url: vaultAuthUrlResponse.data.auth_url });
   } finally {
-    clearTimeout(timeout);
-    server?.close();
+    server.close();
   }
-}
+  if (!accessToken) {
+    throw new Error("Vault OIDC login did not return a token");
+  }
 
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
-}
-
-function signInPage(title: string, message: string): string {
-  return `<!doctype html><meta charset="utf-8"><title>${escapeHtml(title)}</title>
-<body style="font-family: -apple-system, sans-serif; display: grid; place-items: center; height: 90vh; color: #333">
-<div style="text-align: center"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p></div></body>`;
+  await client.setTokens({
+    accessToken,
+    expiresIn,
+  });
+  return accessToken;
 }
