@@ -1,10 +1,13 @@
 import { URL } from "url";
 import http from "http";
 import { OAuth } from "@raycast/api";
-import { callLoginWthOidc, callOidcAuthUrl } from "./utils";
+import { callLoginWthOidc, callOidcAuthUrl, callRenewSelf } from "./utils";
 import { getActiveVault, VaultInstance } from "./vaults";
 
 const localPort = 8250;
+
+// Renew tokens with less than this left, so a vault used at least once a token TTL stays signed in
+const renewWithinMs = 30 * 60 * 1000;
 
 const clients = new Map<string, OAuth.PKCEClient>();
 
@@ -76,6 +79,17 @@ async function login(vault: VaultInstance): Promise<string> {
   const client = getClient(vault);
   const tokenSet = await client.getTokens();
   if (tokenSet?.accessToken && !tokenSet.isExpired()) {
+    const expiresAt = tokenSet.updatedAt.getTime() + (tokenSet.expiresIn ?? 0) * 1000;
+    if (!tokenSet.expiresIn || expiresAt - Date.now() > renewWithinMs) {
+      return tokenSet.accessToken;
+    }
+    try {
+      const renewed = await callRenewSelf(tokenSet.accessToken);
+      await client.setTokens({ accessToken: tokenSet.accessToken, expiresIn: renewed.auth.lease_duration });
+    } catch (error) {
+      // Still valid for now, so carry on and sign in again once it expires
+      console.warn("Could not renew Vault token", error);
+    }
     return tokenSet.accessToken;
   }
 
